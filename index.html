@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>宇宙时间钟 · 地理与天文中的此刻</title>
+<style>
+/* 兼容说明：仅使用旧版内核支持的定位、浮动与固定像素值 */
+*{-webkit-box-sizing:border-box;box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#03060f;color:#e6eefb;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:rgba(0,0,0,0);
+  -webkit-user-select:none;user-select:none}
+canvas{position:fixed;top:0;left:0;right:0;bottom:0;display:block}
+.ui{position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;padding:18px 18px 16px}
+
+header{text-align:center}
+.place{font-size:10px;letter-spacing:.22em;color:rgba(198,216,240,.52);text-transform:uppercase}
+.clock{margin:6px 0 2px;font-size:52px;font-weight:200;line-height:1;letter-spacing:.06em;
+  text-shadow:0 0 32px rgba(120,175,255,.35)}
+.clock small{font-size:.28em;opacity:.5;letter-spacing:.1em;vertical-align:middle;margin-left:.4em}
+.date{font-size:11px;letter-spacing:.12em;color:rgba(198,216,240,.52)}
+
+.bottom{position:absolute;left:18px;right:18px;bottom:16px}
+.bottom:after{content:"";display:block;clear:both}
+.hud{border:1px solid rgba(140,180,235,.18);border-radius:10px;overflow:hidden;
+  background:rgba(8,14,28,.55)}
+.cell{float:left;width:50%;padding:6px 8px;background:rgba(6,11,24,.62);
+  border-right:1px solid rgba(140,180,235,.18);
+  border-bottom:1px solid rgba(140,180,235,.18)}
+.cell:nth-child(2n){border-right:none}
+.cell b{display:block;font-size:9px;font-weight:400;letter-spacing:.14em;
+  color:rgba(198,216,240,.52);margin-bottom:3px}
+.cell span{font-size:12px;letter-spacing:.01em}
+
+.row{margin-top:10px;text-align:right}
+.ctrl{pointer-events:auto}
+.ctrl button{display:inline-block;appearance:none;-webkit-appearance:none;
+  border:1px solid rgba(140,180,235,.18);background:rgba(10,18,36,.7);
+  color:rgba(198,216,240,.52);font-size:11px;letter-spacing:.06em;
+  padding:7px 10px;margin:0 5px 6px 0;border-radius:999px;
+  cursor:pointer;font-family:inherit}
+.ctrl button.on{color:#fff;border-color:rgba(130,190,255,.65);
+  background:rgba(60,110,190,.28);box-shadow:0 0 18px rgba(80,150,255,.25)}
+.tip{font-size:10px;letter-spacing:.08em;color:rgba(170,195,230,.42);margin-top:2px}
+
+@media (max-width:360px){
+  .ui{padding:14px 12px 12px}
+  .bottom{left:12px;right:12px;bottom:12px}
+  .clock{font-size:40px}
+  .cell span{font-size:11px}
+}
+@media (min-width:600px) and (max-width:899px){ .clock{font-size:72px} }
+@media (min-width:900px){
+  .ui{padding:26px 40px 24px}
+  .bottom{left:40px;right:40px;bottom:24px}
+  .clock{font-size:88px}
+  .hud{float:left;width:52%;max-width:560px}
+  .cell{width:33.333%;border-right:1px solid rgba(140,180,235,.18);padding:9px 10px}
+  .cell:nth-child(2n){border-right:1px solid rgba(140,180,235,.18)}
+  .cell:nth-child(3n){border-right:none}
+  .cell span{font-size:13px}
+  .row{float:right;width:36%;margin-top:0}
+  .tip{margin-top:10px}
+}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div class="ui">
+  <header>
+    <div class="place" id="place">Luoyang · 34.62°N 112.45°E · UTC+8</div>
+    <div class="clock" id="clock">--:--:--<small>此刻</small></div>
+    <div class="date" id="date">—</div>
+  </header>
+
+  <div class="bottom">
+    <div class="hud" id="hud">
+      <div class="cell"><b>本地恒星时</b><span id="v1">—</span></div>
+      <div class="cell"><b>太阳高度</b><span id="v2">—</span></div>
+      <div class="cell"><b>日出 · 日落</b><span id="v3">—</span></div>
+      <div class="cell"><b>今日昼长</b><span id="v4">—</span></div>
+      <div class="cell"><b>中天高度</b><span id="v5">—</span></div>
+      <div class="cell"><b>月相 · 月龄</b><span id="v6">—</span></div>
+      <div class="cell"><b>太阳黄经 · 节气</b><span id="v7">—</span></div>
+      <div class="cell"><b>儒略日</b><span id="v8">—</span></div>
+    </div>
+
+    <div class="row">
+      <div class="ctrl" id="ctrl">
+        <button data-speed="1" class="on">1× 实时</button>
+        <button data-speed="60">60×</button>
+        <button data-speed="3600">3600×</button>
+        <button data-speed="reset">回此刻</button>
+      </div>
+      <div class="tip">日弧 · 左东升 右西落 外鼓为昼 · 轻点切流速</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   宇宙时间钟 · 兼容版
+   ES5 语法 / Canvas 2D 基础 API，可在旧版 Android WebView 运行。
+   新增「日弧」：太阳一天的高度轨迹，以极坐标环画在 24h 环之外，
+   正午在最上方且向外鼓起，午夜贴回基准环，日出日落穿过基准环。
+   ============================================================ */
+
+/* ---- rAF 兼容（旧 WebView 可能没有） ---- */
+var raf = window.requestAnimationFrame ||
+          window.webkitRequestAnimationFrame ||
+          window.mozRequestAnimationFrame ||
+          function(cb){ return setTimeout(function(){ cb(Date.now()); }, 16); };
+var caf = window.cancelAnimationFrame || window.webkitCancelAnimationFrame ||
+          function(id){ clearTimeout(id); };
+
+var canvas = document.getElementById('sky');
+var ctx = canvas.getContext('2d');
+var RAD = Math.PI/180, DEG = 180/Math.PI, TAU = Math.PI*2;
+var n360 = function(x){ return ((x%360)+360)%360; };
+var n180 = function(x){ var v=n360(x); return v>180 ? v-360 : v; };
+var clamp = function(v,a,b){ return v<a?a:(v>b?b:v); };
+var pad = function(n){ return ('0'+Math.floor(n)).slice(-2); };
+var $ = function(id){ return document.getElementById(id); };
+
+/* 观测点：洛阳 */
+var LON = 112.45, LAT = 34.62;
+var lon0 = LON, lat0 = LAT;
+
+/* ---- 尺寸与离屏缓存 ---- */
+var W,H,DPR,cx,cy,R,ringRX,ringRY,moR,r0,amp;
+var bgCanvas,galaxyCanvas,lightCanvas,lightCtx,lightImg,LSIZE,moonCanvas,moonCtx,moonImg;
+var stars = [];
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  cx = W/2; cy = H*0.52;
+  R = Math.min(W*0.285, H*0.205);
+  ringRX = Math.min(W*0.47, R*2.15);
+  ringRY = ringRX*0.80;
+  moR = ringRY*1.09;
+  r0 = R*1.24;                                  /* 24 小时基准环 */
+  amp = Math.min(R*0.50, ringRY*0.42, Math.min(W,H)*0.5 - r0 - 10);
+  if(amp < 16) amp = 16;
+
+  buildBG(); buildGalaxy(); buildStars(); buildLight(); buildMoon();
+  curveKey = '';                                /* 尺寸变了，日弧重算 */
+}
+
+function buildBG(){
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W; bgCanvas.height = H;
+  var g = bgCanvas.getContext('2d');
+  g.fillStyle = '#03060f'; g.fillRect(0,0,W,H);
+  var rg = g.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*0.72);
+  rg.addColorStop(0,'rgba(22,38,78,.55)');
+  rg.addColorStop(.45,'rgba(10,20,46,.30)');
+  rg.addColorStop(1,'rgba(2,4,10,0)');
+  g.fillStyle = rg; g.fillRect(0,0,W,H);
+}
+
+function buildGalaxy(){
+  var s = Math.ceil(Math.max(W,H)*1.45);
+  galaxyCanvas = document.createElement('canvas');
+  galaxyCanvas.width = galaxyCanvas.height = s;
+  var g = galaxyCanvas.getContext('2d');
+  g.translate(s/2,s/2); g.rotate(-0.52);
+  var k,x,y,rg;
+  for(k=0;k<20;k++){
+    x=(k-9.5)*s*0.042; y=Math.sin(k*1.63)*s*0.022;
+    rg=g.createRadialGradient(x,y,0,x,y,s*0.20);
+    rg.addColorStop(0,'rgba(105,125,195,.055)');
+    rg.addColorStop(.55,'rgba(80,105,175,.022)');
+    rg.addColorStop(1,'rgba(70,95,160,0)');
+    g.fillStyle=rg; g.fillRect(-s/2,-s/2,s,s);
+  }
+  galaxyCanvas._s = s;
+}
+
+function buildStars(){
+  var count = Math.round(clamp(W*H/2600, 220, 620));
+  var hues = ['#ffffff','#dce9ff','#fff2dc','#c9dcff','#ffe6cf'];
+  stars = [];
+  for(var i=0;i<count;i++){
+    stars.push({
+      a: Math.random()*TAU,
+      rr: Math.sqrt(Math.random())*0.98+0.02,
+      m: 0.25+Math.random()*0.75,
+      size: Math.random()<0.09 ? 1.9 : 1.1,
+      hue: hues[(Math.random()*hues.length)|0],
+      ph: Math.random()*TAU
+    });
+  }
+}
+
+function buildLight(){
+  LSIZE = Math.min(120, Math.max(64, Math.round(R*1.1)));
+  lightCanvas = document.createElement('canvas');
+  lightCanvas.width = lightCanvas.height = LSIZE;
+  lightCtx = lightCanvas.getContext('2d');
+  lightImg = lightCtx.createImageData(LSIZE,LSIZE);
+}
+
+function buildMoon(){
+  moonCanvas = document.createElement('canvas');
+  moonCanvas.width = moonCanvas.height = 64;
+  moonCtx = moonCanvas.getContext('2d');
+  moonImg = moonCtx.createImageData(64,64);
+}
+
+/* ---- 兼容工具：椭圆用贝塞尔，不用 ctx.ellipse ---- */
+function ellipsePath(c,x,y,rx,ry){
+  var k=0.5522847498;
+  c.moveTo(x+rx,y);
+  c.bezierCurveTo(x+rx,y+ry*k, x+rx*k,y+ry, x,y+ry);
+  c.bezierCurveTo(x-rx*k,y+ry, x-rx,y+ry*k, x-rx,y);
+  c.bezierCurveTo(x-rx,y-ry*k, x-rx*k,y-ry, x,y-ry);
+  c.bezierCurveTo(x+rx*k,y-ry, x+rx,y-ry*k, x+rx,y);
+  c.closePath();
+}
+/* 兼容工具：手绘虚线圆，不依赖原生虚线接口 */
+function dashCircle(c,r,dash,gap){
+  var step=0.03, acc=0, down=true, i, a, x, y, px=0, py=0, first=true;
+  for(i=0;i<=Math.ceil(TAU/step)+1;i++){
+    a=i*step; x=r*Math.cos(a); y=r*Math.sin(a);
+    if(first){ c.moveTo(x,y); first=false; }
+    else{
+      if(down) c.lineTo(x,y);
+      acc += Math.sqrt((x-px)*(x-px)+(y-py)*(y-py));
+      if(acc >= (down?dash:gap)){
+        acc=0; down=!down;
+        c.moveTo(x,y);
+      }
+    }
+    px=x; py=y;
+  }
+}
+function upTo(el,tag){
+  while(el && el.nodeName !== tag.toUpperCase()) el = el.parentNode;
+  return el;
+}
+
+/* ---- 天文计算（低精度近似，足够可视化） ---- */
+function astro(d){
+  var jd = d.getTime()/86400000 + 2440587.5;
+  var n  = jd - 2451545.0;
+  var T  = n/36525;
+  var gmst = n360(280.46061837 + 360.98564736629*n + 0.000387933*T*T - T*T*T/38710000);
+  var L = n360(280.460 + 0.9856474*n);
+  var g = n360(357.528 + 0.9856003*n)*RAD;
+  var lam = n360(L + 1.915*Math.sin(g) + 0.020*Math.sin(2*g));
+  var eps = (23.439 - 0.0000004*n)*RAD;
+  var lr = lam*RAD;
+  var ra = n360(Math.atan2(Math.cos(eps)*Math.sin(lr), Math.cos(lr))*DEG);
+  var dec = Math.asin(Math.sin(eps)*Math.sin(lr));
+  var lst = n360(gmst + lon0);
+  var Hnow = n180(lst - ra)*RAD;
+  var phi = lat0*RAD;
+  var alt = Math.asin(clamp(Math.sin(phi)*Math.sin(dec)+Math.cos(phi)*Math.cos(dec)*Math.cos(Hnow),-1,1));
+  var dayLen = Math.acos(clamp(-Math.tan(phi)*Math.tan(dec),-1,1))*DEG*2/15;
+  var lonSun = n180(ra - gmst);
+  var syn = 29.530588853;
+  var ref = Date.UTC(2000,0,6,18,14)/86400000 + 2440587.5;
+  var age = ((jd-ref)%syn+syn)%syn;
+  return {
+    jd:jd, gmst:gmst, lam:lam, ra:ra, dec:dec, lst:lst, Hnow:Hnow,
+    alt:alt, dayLen:dayLen, lonSun:lonSun, age:age, phase:age/syn
+  };
+}
+
+var TERMS = ['立春','雨水','惊蛰','春分','清明','谷雨','立夏','小满','芒种','夏至',
+             '小暑','大暑','立秋','处暑','白露','秋分','寒露','霜降','立冬','小雪',
+             '大雪','冬至','小寒','大寒'];
+var MOON_NAMES = ['新月','蛾眉月','上弦月','盈凸月','满月','亏凸月','下弦月','残月'];
+
+/* 正交投影：经纬度 -> 单位圆盘 */
+function project(lon,lat){
+  var d=(lon-lon0)*RAD, la=lat*RAD, l0=lat0*RAD;
+  var cl=Math.cos(la), sl=Math.sin(la);
+  return {
+    x: cl*Math.sin(d),
+    y: Math.cos(l0)*sl - Math.sin(l0)*cl*Math.cos(d),
+    z: Math.sin(l0)*sl + Math.cos(l0)*cl*Math.cos(d)
+  };
+}
+function sunVec(A){
+  var d=(A.lonSun-lon0)*RAD, de=A.dec, l0=lat0*RAD;
+  return {
+    x: Math.cos(de)*Math.sin(d),
+    y: Math.cos(l0)*Math.sin(de) - Math.sin(l0)*Math.cos(de)*Math.cos(d),
+    z: Math.sin(l0)*Math.sin(de) + Math.cos(l0)*Math.cos(de)*Math.cos(d)
+  };
+}
+
+/* ---- 简化的大陆轮廓 ---- */
+var LANDS = [
+ [[-10,36],[0,44],[10,44],[20,40],[28,41],[35,36],[45,40],[50,30],[60,25],[70,22],[80,15],[90,22],[100,10],[105,20],[110,20],[120,30],[125,40],[135,45],[145,50],[160,60],[170,65],[150,70],[120,73],[90,75],[60,70],[40,65],[30,70],[20,60],[10,58],[0,52],[-10,48],[-10,36]],
+ [[-17,15],[-5,5],[10,-5],[12,-18],[15,-30],[20,-35],[30,-30],[35,-20],[40,-10],[45,0],[51,10],[43,12],[35,20],[32,31],[20,32],[10,37],[0,35],[-10,30],[-17,15]],
+ [[-168,65],[-150,70],[-130,70],[-110,68],[-95,72],[-80,70],[-65,60],[-55,50],[-65,45],[-75,35],[-81,25],[-90,29],[-100,20],[-110,23],[-120,32],[-125,48],[-140,60],[-168,65]],
+ [[-80,10],[-70,12],[-60,8],[-50,0],[-35,-6],[-38,-20],[-48,-28],[-55,-38],[-65,-55],[-75,-50],[-72,-35],[-70,-18],[-78,-5],[-80,10]],
+ [[113,-22],[115,-35],[130,-32],[140,-38],[150,-35],[153,-25],[145,-12],[130,-12],[118,-15],[113,-22]],
+ [[-52,60],[-40,65],[-25,72],[-30,82],[-50,83],[-60,75],[-52,60]],
+ [[40,60],[60,60],[90,55],[110,50],[100,42],[70,45],[50,50],[40,60]]
+];
+var CITIES = [
+ [112.45,34.62],[116.4,39.9],[121.47,31.23],[113.26,23.13],[114.17,22.32],[108.94,34.34],
+ [104.06,30.67],[106.55,29.56],[114.3,30.6],[120.16,30.27],[118.8,32.06],[126.63,45.75],
+ [139.69,35.69],[126.98,37.57],[103.82,1.35],[100.5,13.75],[77.21,28.61],[72.88,19.08],
+ [55.27,25.2],[37.62,55.75],[28.98,41.01],[-0.13,51.51],[2.35,48.86],[13.4,52.52],
+ [31.24,30.04],[-3.7,40.42],[-74.01,40.71],[-118.24,34.05],[-87.63,41.88],[-99.13,19.43],
+ [-43.2,-22.91],[-58.38,-34.6],[151.21,-33.87],[18.42,-33.92],[106.85,-6.21],[121.56,25.03]
+];
+
+/* ---- 星空 ---- */
+function drawGalaxy(lst){
+  var s = galaxyCanvas._s;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(-lst*RAD*0.85);
+  ctx.drawImage(galaxyCanvas,-s/2,-s/2); ctx.restore();
+}
+function drawStars(lst,now){
+  var maxR = Math.max(W,H)*0.72, i, s, rr, tw;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(-lst*RAD);
+  for(i=0;i<stars.length;i++){
+    s=stars[i]; rr=s.rr*maxR;
+    tw=0.72+0.28*Math.sin(now*0.0012*(0.4+s.m)+s.ph);
+    ctx.globalAlpha=s.m*tw; ctx.fillStyle=s.hue;
+    ctx.fillRect(Math.cos(s.a)*rr, Math.sin(s.a)*rr, s.size, s.size);
+  }
+  ctx.restore(); ctx.globalAlpha=1;
+}
+
+/* ---- 黄道环（年） ---- */
+function drawEcliptic(A,now){
+  var termIdx = Math.floor(n360(A.lam-315)/15)%24;
+  var i,a,x1,y1,cur,k,sa,sx,sy,halo,L;
+  ctx.save(); ctx.translate(cx,cy);
+
+  ctx.strokeStyle='rgba(130,170,235,.16)'; ctx.lineWidth=1;
+  ctx.beginPath(); ellipsePath(ctx,0,0,ringRX,ringRY); ctx.stroke();
+  ctx.strokeStyle='rgba(130,170,235,.07)';
+  ctx.beginPath(); ellipsePath(ctx,0,0,ringRX*1.045,ringRY*1.045); ctx.stroke();
+
+  for(i=0;i<24;i++){
+    a=i*15*RAD;
+    x1=ringRX*Math.cos(a); y1=ringRY*Math.sin(a);
+    cur=(i===termIdx); k=cur?1.10:1.035;
+    ctx.strokeStyle=cur?'rgba(255,206,130,.85)':'rgba(150,185,235,.28)';
+    ctx.lineWidth=cur?2:1;
+    ctx.beginPath(); ctx.moveTo(x1,y1);
+    ctx.lineTo(ringRX*k*Math.cos(a),ringRY*k*Math.sin(a)); ctx.stroke();
+  }
+
+  sa=-A.lam*RAD; sx=ringRX*Math.cos(sa); sy=ringRY*Math.sin(sa);
+  halo=ctx.createRadialGradient(sx,sy,0,sx,sy,42);
+  halo.addColorStop(0,'rgba(255,238,190,.95)');
+  halo.addColorStop(.18,'rgba(255,190,90,.55)');
+  halo.addColorStop(.55,'rgba(255,140,50,.14)');
+  halo.addColorStop(1,'rgba(255,120,40,0)');
+  ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(sx,sy,42,0,TAU); ctx.fill();
+
+  ctx.strokeStyle='rgba(255,205,120,.45)'; ctx.lineWidth=1;
+  for(i=0;i<10;i++){
+    a=i*TAU/10 + now*0.00008; L=13+4*Math.sin(now*0.0016+i);
+    ctx.beginPath();
+    ctx.moveTo(sx+Math.cos(a)*10,sy+Math.sin(a)*10);
+    ctx.lineTo(sx+Math.cos(a)*L,sy+Math.sin(a)*L); ctx.stroke();
+  }
+  ctx.fillStyle='#fff6dd'; ctx.beginPath(); ctx.arc(sx,sy,5.5,0,TAU); ctx.fill();
+  ctx.font='11px -apple-system,"PingFang SC",sans-serif';
+  ctx.fillStyle='rgba(255,214,150,.9)'; ctx.textAlign='center';
+  ctx.fillText('· '+TERMS[termIdx]+' ·', sx, sy+26);
+  ctx.restore();
+}
+
+/* ---- 白道与月相（月） ---- */
+function renderMoon(phase){
+  var p=phase*TAU, sp=Math.sin(p), cp=Math.cos(p);
+  var dt=moonImg.data, c=32, r=31, i,j,X,Y,q,k,Z,lit,edge,v,tex;
+  for(j=0;j<64;j++){
+    Y=-(j-c)/r;
+    for(i=0;i<64;i++){
+      X=(i-c)/r; q=X*X+Y*Y; k=(j*64+i)*4;
+      if(q>1){ dt[k+3]=0; continue; }
+      Z=Math.sqrt(1-q);
+      lit=(X*sp - Z*cp > 0);
+      edge=clamp((1-Math.sqrt(q))*6,0,1);
+      if(lit){
+        tex=0.90-0.10*Math.sin(X*11+Y*7)*Math.cos(Y*9-X*5);
+        v=Math.round(235*tex);
+        dt[k]=v; dt[k+1]=Math.round(v*0.97); dt[k+2]=Math.round(v*0.90);
+      }else{
+        v=Math.round(26+10*Math.sin(X*8)*Math.cos(Y*6));
+        dt[k]=v; dt[k+1]=v+3; dt[k+2]=v+12;
+      }
+      dt[k+3]=Math.round(255*edge);
+    }
+  }
+  moonCtx.putImageData(moonImg,0,0);
+}
+function drawMoonPath(A){
+  var u,ix,iy,j,p,ma,mx,my,mr,glow;
+  ctx.save(); ctx.translate(cx,cy);
+
+  ctx.strokeStyle='rgba(170,190,225,.15)'; ctx.lineWidth=1;
+  ctx.beginPath(); dashCircle(ctx,moR,3,7); ctx.stroke();
+
+  u = ringRX*ringRX*(ringRY*ringRY-moR*moR)/(ringRY*ringRY-ringRX*ringRX);
+  ix=Math.sqrt(Math.max(0,u)); iy=Math.sqrt(Math.max(0,moR*moR-u));
+  var pts=[[ix,iy],[-ix,iy],[ix,-iy],[-ix,-iy]];
+  ctx.fillStyle='rgba(190,212,248,.5)';
+  for(j=0;j<pts.length;j++){
+    p=pts[j]; ctx.beginPath(); ctx.arc(p[0],p[1],1.8,0,TAU); ctx.fill();
+  }
+
+  ma=-A.lam*RAD + A.phase*TAU;
+  mx=moR*Math.cos(ma); my=moR*Math.sin(ma);
+  mr=clamp(R*0.062,8,15);
+  glow=ctx.createRadialGradient(mx,my,0,mx,my,mr*3.2);
+  glow.addColorStop(0,'rgba(210,225,255,.22)');
+  glow.addColorStop(1,'rgba(180,210,255,0)');
+  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(mx,my,mr*3.2,0,TAU); ctx.fill();
+  renderMoon(A.phase);
+  ctx.drawImage(moonCanvas,mx-mr,my-mr,mr*2,mr*2);
+  ctx.restore();
+}
+
+/* ============================================================
+   日弧：太阳一天的高度轨迹
+   角度 a(t) = -π/2 + (t-12)·2π/24  → 正午在上、6点在左(东)、18点在右(西)
+   半径 r(t) = r0 + 白天外鼓 / 夜间微内收
+   曲线形状全天几乎不变，故按 3 秒缓存，每帧只移动当前光点。
+   ============================================================ */
+var curveKey='', curve=null;
+function arcAngle(t){ return -Math.PI/2 + (t-12)*TAU/24; }
+function arcRadius(alt){
+  var h=alt*DEG;
+  if(h>0) return r0 + (h/90)*amp;
+  return r0 - Math.min(1,-h/90)*amp*0.16;
+}
+function fmtT(t){
+  t=n360(t*15)/15;                 /* 归一到 0..24 */
+  var h=Math.floor(t), m=Math.floor((t-h)*60);
+  return pad(h)+':'+pad(m);
+}
+function getCurve(A,d){
+  var key = Math.floor(d.getTime()/3000)+'|'+Math.round(lat0*2)+'|'+Math.round(lon0*2)+'|'+Math.round(R);
+  if(key===curveKey && curve) return curve;
+  curveKey=key;
+
+  var hNow=d.getHours()+d.getMinutes()/60+d.getSeconds()/3600+d.getMilliseconds()/3600000;
+  var base=A.Hnow*DEG - 15*hNow;       /* 常数：真太阳时与民用时的偏移 */
+  var phi=lat0*RAD, dec=A.dec, sP=Math.sin(phi)*Math.sin(dec), cP=Math.cos(phi)*Math.cos(dec);
+  var N=240, pts=new Array(N+1), i,t,H,alt,a,rr;
+  var sunrise=-1, sunset=-1, noon=-1, noonAlt=-9;
+
+  for(i=0;i<=N;i++){
+    t=i*24/N;
+    H=(base+15*t)*RAD;
+    alt=Math.asin(clamp(sP+cP*Math.cos(H),-1,1));
+    a=arcAngle(t); rr=arcRadius(alt);
+    pts[i]={t:t, alt:alt, a:a, r:rr, x:rr*Math.cos(a), y:rr*Math.sin(a)};
+    if(alt>noonAlt){ noonAlt=alt; noon=i; }
+    if(i>0){
+      if(pts[i-1].alt<0 && alt>=0 && sunrise<0) sunrise=t;
+      if(pts[i-1].alt>=0 && alt<0 && sunset<0) sunset=t;
+    }
+  }
+  curve={pts:pts, sunrise:sunrise, sunset:sunset, noon:noon, noonAlt:noonAlt,
+         hNow:hNow, base:base, sP:sP, cP:cP};
+  return curve;
+}
+function drawDayArc(A,d,now){
+  var C=getCurve(A,d), pts=C.pts, i,p,q,segs,cur,a,mxx,myy,marks;
+  var aNow,altNow,rNow,ux,uy,sgn;
+  ctx.save(); ctx.translate(cx,cy);
+
+  /* 暗底：整条闭合轨迹（含夜段） */
+  ctx.strokeStyle='rgba(120,165,225,.22)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for(i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.stroke();
+
+  /* 昼段：金橙发光弧 */
+  segs=[]; cur=null;
+  for(i=0;i<pts.length;i++){
+    if(pts[i].alt>0){ if(!cur){cur=[];segs.push(cur);} cur.push(pts[i]); }
+    else cur=null;
+  }
+  ctx.save();
+  ctx.shadowColor='rgba(255,170,70,.8)'; ctx.shadowBlur=12;
+  ctx.strokeStyle='rgba(255,190,100,.92)'; ctx.lineWidth=2.2;
+  for(q=0;q<segs.length;q++){
+    ctx.beginPath(); ctx.moveTo(segs[q][0].x,segs[q][0].y);
+    for(i=1;i<segs[q].length;i++) ctx.lineTo(segs[q][i].x,segs[q][i].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,242,205,.55)'; ctx.lineWidth=0.8;
+  for(q=0;q<segs.length;q++){
+    ctx.beginPath(); ctx.moveTo(segs[q][0].x,segs[q][0].y);
+    for(i=1;i<segs[q].length;i++) ctx.lineTo(segs[q][i].x,segs[q][i].y);
+    ctx.stroke();
+  }
+
+  /* 日出 / 日落：弧与基准环的交点 */
+  var marks=[{t:C.sunrise,label:'日出'},{t:C.sunset,label:'日落'}];
+  ctx.font='9px ui-monospace,Menlo,monospace'; ctx.textAlign='center';
+  for(q=0;q<marks.length;q++){
+    if(marks[q].t<0) continue;
+    a=arcAngle(marks[q].t);
+    var mxx=r0*Math.cos(a), myy=r0*Math.sin(a);
+    ctx.strokeStyle='rgba(255,205,135,.85)'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(mxx,myy,3.2,0,TAU); ctx.stroke();
+    ctx.fillStyle='rgba(255,214,155,.75)';
+    ctx.fillText(marks[q].label+' '+fmtT(marks[q].t),
+                 (r0+15)*Math.cos(a), (r0+15)*Math.sin(a)+3);
+  }
+
+  /* 正午顶点标注 */
+  if(C.noon>=0){
+    p=pts[C.noon];
+    ctx.fillStyle='rgba(255,232,180,.8)';
+    ctx.fillText('中天 '+(C.noonAlt*DEG).toFixed(0)+'°',
+                 (p.r+16)*Math.cos(p.a), (p.r+16)*Math.sin(p.a)+3);
+  }
+
+  /* 当前时刻：径向高度指针 + 光点 */
+  var aNow=arcAngle(C.hNow);
+  var altNow=Math.asin(clamp(C.sP+C.cP*Math.cos((C.base+15*C.hNow)*RAD),-1,1));
+  var rNow=arcRadius(altNow);
+  var ux=Math.cos(aNow), uy=Math.sin(aNow);
+  ctx.strokeStyle= altNow>0 ? 'rgba(255,205,130,.8)' : 'rgba(130,170,225,.55)';
+  ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(r0*ux,r0*uy); ctx.lineTo(rNow*ux,rNow*uy); ctx.stroke();
+
+  ctx.save();
+  ctx.shadowColor='rgba(255,205,120,.95)'; ctx.shadowBlur=16;
+  ctx.fillStyle='#fff3d6'; ctx.beginPath(); ctx.arc(rNow*ux,rNow*uy,4,0,TAU); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,225,165,.6)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(rNow*ux,rNow*uy,7.5,0,TAU); ctx.stroke();
+
+  ctx.font='10px ui-monospace,Menlo,monospace';
+  ctx.fillStyle='rgba(255,235,195,.9)';
+  var sgn=altNow*DEG>=0?'+':'−';
+  ctx.fillText(sgn+Math.abs(altNow*DEG).toFixed(1)+'°',
+               (rNow+22)*ux, (rNow+22)*uy+3);
+
+  ctx.restore();
+}
+
+/* ---- 24 小时基准环（与日弧同角度体系：12 点在上、0/24 在下） ---- */
+function drawHourRing(d,now){
+  var i,a,h,hf,as,rr=r0;
+  ctx.save(); ctx.translate(cx,cy);
+  ctx.strokeStyle='rgba(135,175,230,.16)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(0,0,rr,0,TAU); ctx.stroke();
+
+  for(i=0;i<96;i++){
+    a=-Math.PI/2+i*TAU/96;
+    var big=(i%4===0), len=big?7:3;
+    ctx.strokeStyle=big?'rgba(170,205,250,.42)':'rgba(150,185,235,.16)';
+    ctx.beginPath();
+    ctx.moveTo(rr*Math.cos(a),rr*Math.sin(a));
+    ctx.lineTo((rr+len)*Math.cos(a),(rr+len)*Math.sin(a)); ctx.stroke();
+  }
+  ctx.font='9px ui-monospace,Menlo,monospace';
+  ctx.fillStyle='rgba(180,210,250,.5)'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  var hrs=[0,6,12,18];
+  for(i=0;i<hrs.length;i++){
+    h=hrs[i]; a=arcAngle(h);
+    ctx.fillText(pad(h),(rr+18)*Math.cos(a),(rr+18)*Math.sin(a));
+  }
+
+  hf=d.getHours()+d.getMinutes()/60+d.getSeconds()/3600+d.getMilliseconds()/3600000;
+  a=arcAngle(hf);
+  ctx.save();
+  ctx.shadowColor='rgba(120,190,255,.9)'; ctx.shadowBlur=14;
+  ctx.strokeStyle='rgba(190,225,255,.9)'; ctx.lineWidth=1.6;
+  ctx.beginPath();
+  ctx.moveTo((rr-6)*Math.cos(a),(rr-6)*Math.sin(a));
+  ctx.lineTo((rr+13)*Math.cos(a),(rr+13)*Math.sin(a)); ctx.stroke();
+  ctx.restore();
+
+  var s=d.getSeconds()+d.getMilliseconds()/1000;
+  as=-Math.PI/2+s*TAU/60;
+  ctx.fillStyle='rgba(255,225,170,.95)';
+  ctx.beginPath(); ctx.arc(rr*Math.cos(as),rr*Math.sin(as),2.2,0,TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ---- 地球 ---- */
+function strokeGeo(pts){
+  var prev=false,i,p;
+  ctx.beginPath();
+  for(i=0;i<pts.length;i++){
+    p=project(pts[i][0],pts[i][1]);
+    if(p.z>0.01){
+      var x=cx+R*p.x, y=cy-R*p.y;
+      if(prev) ctx.lineTo(x,y); else ctx.moveTo(x,y);
+      prev=true;
+    }else prev=false;
+  }
+  ctx.stroke();
+}
+function drawEarth(A,S,now){
+  var sea,data,c,i,j,X,Y,q,k,rho,Z,dt,a,cr,cg,cb,tw,t,limb,l,p,fl,pulse;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.clip();
+
+  sea=ctx.createRadialGradient(cx-R*.35,cy-R*.4,R*.1,cx,cy,R*1.15);
+  sea.addColorStop(0,'#2f6b9e'); sea.addColorStop(.5,'#17456f'); sea.addColorStop(1,'#0a1d38');
+  ctx.fillStyle=sea; ctx.fillRect(cx-R,cy-R,R*2,R*2);
+
+  data=lightImg.data; c=LSIZE/2;
+  for(j=0;j<LSIZE;j++){
+    Y=-(j-c)/c;
+    for(i=0;i<LSIZE;i++){
+      X=(i-c)/c; q=X*X+Y*Y; k=(j*LSIZE+i)*4;
+      if(q>1){ data[k+3]=0; continue; }
+      rho=Math.sqrt(q); Z=Math.sqrt(1-q);
+      dt=X*S.x+Y*S.y+Z*S.z;
+      a=0; cr=6; cg=11; cb=26;
+      if(dt<0) a=0.30+0.55*Math.min(1,-dt*2.2);
+      else if(dt>0.55){ cr=255; cg=232; cb=190; a=(dt-0.55)/0.45*0.10; }
+      tw=Math.max(0,1-Math.abs(dt)/0.075);
+      if(tw>0){
+        t=0.55*tw*tw;
+        cr+=(255-cr)*t; cg+=(146-cg)*t; cb+=(64-cb)*t;
+        a=Math.max(a,t*0.92);
+      }
+      limb=Math.max(0,(rho-0.86)/0.14);
+      if(limb>0){
+        l=0.34*limb*limb;
+        cr+=(95-cr)*l; cg+=(165-cg)*l; cb+=(255-cb)*l;
+        a=Math.max(a,l);
+      }
+      data[k]=cr|0; data[k+1]=cg|0; data[k+2]=cb|0;
+      data[k+3]=Math.round(clamp(a,0,1)*255);
+    }
+  }
+  lightCtx.putImageData(lightImg,0,0);
+  ctx.drawImage(lightCanvas,cx-R,cy-R,R*2,R*2);
+
+  ctx.lineWidth=1; ctx.strokeStyle='rgba(150,205,240,.15)';
+  var lon,la,pts;
+  for(lon=-180;lon<180;lon+=30){
+    pts=[]; for(la=-80;la<=80;la+=5) pts.push([lon,la]);
+    strokeGeo(pts);
+  }
+  for(la=-60;la<=60;la+=30){
+    pts=[]; for(lon=-180;lon<=180;lon+=5) pts.push([lon,la]);
+    strokeGeo(pts);
+  }
+  ctx.strokeStyle='rgba(180,220,205,.34)'; ctx.lineWidth=1.1;
+  for(i=0;i<LANDS.length;i++) strokeGeo(LANDS[i]);
+
+  for(i=0;i<CITIES.length;i++){
+    p=project(CITIES[i][0],CITIES[i][1]);
+    if(p.z<0.02) continue;
+    dt=p.x*S.x+p.y*S.y+p.z*S.z;
+    if(dt> -0.04) continue;
+    fl=0.55+0.45*Math.sin(now*0.002+i*2.3);
+    ctx.fillStyle='rgba(255,196,110,'+(0.30+0.55*fl).toFixed(2)+')';
+    ctx.beginPath(); ctx.arc(cx+R*p.x,cy-R*p.y,1.25,0,TAU); ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowColor='rgba(80,155,255,.85)'; ctx.shadowBlur=26;
+  ctx.strokeStyle='rgba(110,175,255,.34)'; ctx.lineWidth=2.4;
+  ctx.beginPath(); ctx.arc(cx,cy,R+0.5,0,TAU); ctx.stroke();
+  ctx.restore();
+
+  pulse=0.5+0.5*Math.sin(now*0.0022);
+  ctx.save();
+  ctx.strokeStyle='rgba(255,120,105,'+(0.25+0.35*pulse).toFixed(2)+')';
+  ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy,7+pulse*7,0,TAU); ctx.stroke();
+  ctx.shadowColor='rgba(255,110,90,.9)'; ctx.shadowBlur=12;
+  ctx.fillStyle='#ff7d6a'; ctx.beginPath(); ctx.arc(cx,cy,2.6,0,TAU); ctx.fill();
+  ctx.restore();
+
+  ctx.font='10px -apple-system,"PingFang SC",sans-serif';
+  ctx.fillStyle='rgba(255,190,175,.85)'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('观测点',cx+11,cy-8);
+  ctx.fillStyle='rgba(190,215,245,.45)';
+  ctx.fillText(lat0.toFixed(1)+'° / '+lon0.toFixed(1)+'°',cx+11,cy+7);
+}
+
+/* ---- HUD ---- */
+function updateUI(d,A,C){
+  $('clock').innerHTML = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+'<small>此刻</small>';
+  var wk=['日','一','二','三','四','五','六'][d.getDay()];
+  var doy=Math.floor((d-new Date(d.getFullYear(),0,0))/86400000);
+  $('date').textContent = d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 · 周'+wk+' · 第 '+doy+' 天';
+  $('place').textContent = 'Observer · '+lat0.toFixed(2)+'°N '+lon0.toFixed(2)+'°E · UTC+8';
+
+  var lh=A.lst/15, lhh=Math.floor(lh), lmm=Math.floor((lh-lhh)*60), lss=Math.floor(((lh-lhh)*60-lmm)*60);
+  $('v1').textContent = pad(lhh)+':'+pad(lmm)+':'+pad(lss);
+  $('v2').textContent = (A.alt*DEG>=0?'+':'−')+Math.abs(A.alt*DEG).toFixed(1)+'°';
+  $('v3').textContent = (C.sunrise>=0?fmtT(C.sunrise):'—')+' / '+(C.sunset>=0?fmtT(C.sunset):'—');
+  var dh=Math.floor(A.dayLen), dm=Math.round((A.dayLen-dh)*60);
+  $('v4').textContent = pad(dh)+'h '+pad(dm)+'m';
+  $('v5').textContent = C.noonAlt*DEG>=0 ? (C.noonAlt*DEG).toFixed(1)+'°' : '极夜';
+  $('v6').textContent = MOON_NAMES[Math.round(A.phase*8)%8]+' · '+A.age.toFixed(1)+'d';
+  $('v7').textContent = A.lam.toFixed(1)+'° · '+TERMS[Math.floor(n360(A.lam-315)/15)%24];
+  $('v8').textContent = A.jd.toFixed(2);
+}
+
+/* ---- 时间流速与交互（不用 PointerEvent / dataset / closest） ---- */
+var speed=1, simMs=Date.now(), last=Date.now(), lastUI=0;
+var tmx=0,tmy=0,mx=0,my=0;
+var SPEEDS=[1,60,3600];
+
+function setSpeed(v){
+  speed=v;
+  var bs=document.getElementById('ctrl').getElementsByTagName('button'), i,b,on;
+  for(i=0;i<bs.length;i++){
+    b=bs[i]; on=(String(v)!=='reset' && b.getAttribute('data-speed')===String(v));
+    if(on){ if(b.className.indexOf('on')<0) b.className='on'; }
+    else { b.className=''; }
+  }
+}
+function onCtrl(e){
+  if(e.stopPropagation) e.stopPropagation();
+  var b=upTo(e.target||e.srcElement,'button');
+  if(!b) return;
+  var v=b.getAttribute('data-speed');
+  if(v==='reset'){ simMs=Date.now(); setSpeed(1); }
+  else setSpeed(Number(v));
+}
+function onTap(e){
+  if(e && e.target && upTo(e.target,'button')) return;   /* 按钮自己处理 */
+  var i=-1,j;
+  for(j=0;j<SPEEDS.length;j++) if(SPEEDS[j]===speed) i=j;
+  setSpeed(SPEEDS[(i+1)%SPEEDS.length]);
+}
+function onMove(x,y){ tmx=x/W-0.5; tmy=y/H-0.5; }
+function onMouse(e){ onMove(e.clientX,e.clientY); }
+function onTouch(e){
+  if(e.touches && e.touches.length) onMove(e.touches[0].clientX,e.touches[0].clientY);
+}
+if(document.addEventListener){
+  document.getElementById('ctrl').addEventListener('click',onCtrl,false);
+  document.addEventListener('click',onTap,false);
+  document.addEventListener('mousemove',onMouse,false);
+  document.addEventListener('touchmove',onTouch,false);
+  window.addEventListener('resize',resize,false);
+}else if(document.attachEvent){
+  document.getElementById('ctrl').attachEvent('onclick',onCtrl);
+  document.attachEvent('onclick',onTap);
+  document.attachEvent('onmousemove',onMouse);
+  window.attachEvent('onresize',resize);
+}
+
+/* ---- 主循环 ---- */
+function frame(now){
+  var dt=Math.min(now-last,100); last=now;
+  simMs += dt*speed;
+  var d=new Date(simMs);
+
+  mx += (tmx-mx)*0.045; my += (tmy-my)*0.045;
+  lon0 = LON + mx*12;
+  lat0 = clamp(LAT - my*10, -70, 80);
+
+  var A=astro(d), S=sunVec(A), C=getCurve(A,d);
+
+  ctx.drawImage(bgCanvas,0,0,W,H);
+  drawGalaxy(A.lst);
+  drawStars(A.lst,now);
+  drawEcliptic(A,now);
+  drawMoonPath(A);
+  drawHourRing(d,now);
+  drawDayArc(A,d,now);
+  drawEarth(A,S,now);
+
+  if(now-lastUI>80){ updateUI(d,A,C); lastUI=now; }
+  raf(frame);
+}
+
+resize();
+setSpeed(1);
+raf(frame);
+</script>
+</body>
+</html>
